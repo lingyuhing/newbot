@@ -1,15 +1,17 @@
 from langchain.chat_models import init_chat_model
-from src.config import LLM_BASE_URL, LLM_KEY, LLM_MODEL,ROOT_DIR,SKILL_DIR,SHORT_TERM_MEMORY_DIR
+from src.config import LLM_BASE_URL, LLM_KEY, LLM_MODEL, ROOT_DIR, SKILL_DIR,USER_ID,VIRTUAL_MODE
 from src.agent.langchain_fix.graph import create_deep_agent
-from deepagents.backends import FilesystemBackend
+from deepagents.backends import LocalShellBackend
 from dataclasses import dataclass
-import pickle
+from src.agent.memory import search_memory_tool
 import json
+import sqlite3
+from langgraph.checkpoint.sqlite import SqliteSaver
+from pydantic import BaseModel
 
-@dataclass
-class MessageChannelMessage:
+class MessageChannelMessage(BaseModel):
     message_channel_id: str
-    context:list[dict[str, str]]
+    context: str
 
 model = init_chat_model(
     model=LLM_MODEL,
@@ -18,29 +20,37 @@ model = init_chat_model(
     api_key=LLM_KEY,
 )
 
+# 正确方式：直接构造 SqliteSaver
+conn = sqlite3.connect("checkpoints.db", check_same_thread=False)
+checkpointer = SqliteSaver(conn)
+
 agent = create_deep_agent(
     model=model,
-    backend=FilesystemBackend(root_dir=ROOT_DIR),
-    skills=SKILL_DIR
+    backend=LocalShellBackend(root_dir=ROOT_DIR, virtual_mode=VIRTUAL_MODE),
+    skills=SKILL_DIR,
+    tools=[search_memory_tool],
+    checkpointer=checkpointer
 )
 
-def invoke(messages: MessageChannelMessage):
-    try:
-        history_messages # type: ignore
-    except:
-        try:
-            with open(SHORT_TERM_MEMORY_DIR, "rb") as f:
-                history_messages = pickle.load(f)
-        except:
-            history_messages = []
-    
-    open_messages={
-    "消息渠道ID":messages.message_channel_id,
-    "消息内容":messages.context
+async def stream(messages: MessageChannelMessage):
+    # 添加 thread_id 配置以保持会话记忆
+    config = {
+        "configurable": {
+            "thread_id": USER_ID
+        }
     }
-    open_messages_json = json.dumps(open_messages, ensure_ascii=False)
-    result = agent.invoke(input={"messages":history_messages+[{"role":"user","content":open_messages_json}]})
-    history_messages = result
-    with open(SHORT_TERM_MEMORY_DIR, "wb") as f:
-        pickle.dump(history_messages, f)
-    return result["messages"][-1].content
+    
+    messages_dict = {
+        "消息渠道ID": messages.message_channel_id,
+        "发送内容": messages.context
+    }
+    messages_json = json.dumps(messages_dict, ensure_ascii=False)
+    
+    result = agent.astream(
+        {"messages": [{"role": "user", "content": messages_json}]},
+        config=config,  # 传入配置以启用短期记忆
+        stream_mode="messages"
+    )
+    
+    async for token, message in result:
+        yield token.content
