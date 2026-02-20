@@ -4,6 +4,7 @@ from src.agent.agent import MessageChannelMessage,stream
 from pydantic import BaseModel
 from src.config import HOST,PORT,LOG_LEVEL,LOG_FILE,LOG_DIR,LOG_JSON_FORMAT
 from src.logger import setup_logger, log_websocket, log_error, log_request, log_response
+import asyncio
 
 class Message(BaseModel):
     context: str
@@ -50,12 +51,14 @@ async def chat(websocket: WebSocket, client_id: str):
             while True:
                 data = await websocket.receive_text()
                 log_request(logger, client_id, data)
-                
+
                 token_count = 0
-                async for token in stream(MessageChannelMessage(message_channel_id=client_id, context=data)):
-                    token_count += 1
-                    await websocket.send_text(token)
-                
+                def send_token():
+                    nonlocal token_count
+                    for token in stream(MessageChannelMessage(message_channel_id=client_id, context=data)):
+                        token_count += 1
+                        asyncio.run(websocket.send_text(token))
+                await asyncio.to_thread(send_token)
                 log_response(logger, client_id, token_count)
         except WebSocketDisconnect:
             log_websocket(logger, "DISCONNECT", client_id, "客户端主动断开")

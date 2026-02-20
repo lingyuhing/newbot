@@ -44,7 +44,7 @@ agent = create_deep_agent(
 
 logger.info(f"Agent 初始化完成: model={LLM_MODEL}, root_dir={ROOT_DIR}")
 
-async def stream(messages: MessageChannelMessage):
+def stream(messages: MessageChannelMessage):
     """
     流式处理消息
     
@@ -70,13 +70,13 @@ async def stream(messages: MessageChannelMessage):
     messages_json = json.dumps(messages_dict, ensure_ascii=False)
     
     try:
-        result = agent.astream(
+        result = agent.stream(
             {"messages": [{"role": "user", "content": [{"type":"text","text":messages_json}]+messages.image}]},
             config=config,
             stream_mode="messages"
         )
         
-        async for token, message in result:
+        for token, message in result:
             yield token.content
             
     except Exception as e:

@@ -7,7 +7,7 @@ from src.config import HOST, PORT
 async def send_to_client(
     client_id: str, 
     message: str, 
-    base_url: str = f"{HOST}:{PORT}"
+    base_url: str = f"http://{HOST}:{PORT}"
 ) -> dict:
     """发送消息给特定客户端
     
