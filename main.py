@@ -87,7 +87,9 @@ async def send_message(message: Message):
     logger.info(f"消息已发送: channel_id={message.channel_id}")
     return "成功"
 
+"""
 if __name__ == "__main__":
     import uvicorn
     logger.info(f"服务器监听 {HOST}:{PORT}")
     uvicorn.run("main:app", host=HOST, port=PORT, reload=True)
+"""
