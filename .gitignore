@@ -11,5 +11,13 @@ __pycache__/
 # Testing
 .pytest_cache/
 
+# Logs
+logs/
+*.log
+
+# Database
+*.db
+
 # OS
 .DS_Store
+config.py
