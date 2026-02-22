@@ -15,11 +15,23 @@ VIRTUAL_MODE=False
 MEM0_API_KEY="your-mem0-api-key"
 
 # 服务器配置
-HOST = "http://127.0.0.1"
+HOST = "127.0.0.1"
 PORT = 8000
 
 # 日志配置
-LOG_LEVEL = "INFO"          # 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
-LOG_DIR = "logs"            # 日志目录
-LOG_FILE = "server.log"     # 主日志文件名
-LOG_JSON_FORMAT = False     # 是否使用 JSON 格式（生产环境推荐 True）
+LOG_LEVEL = "INFO"
+LOG_DIR = "logs"
+LOG_FILE = "server.log"
+LOG_JSON_FORMAT = False
+
+# 火山引擎 ASR 配置
+ASR_APP_KEY = ""  # 火山引擎 ASR App Key
+ASR_ACCESS_KEY = ""  # 火山引擎 Access Key
+ASR_RESOURCE_ID = "volc.seedasr.auc"  # Seed-ASR 模型 2.0
+
+# 讯飞声纹识别配置
+XFYUN_API_KEY = ""  # 讯飞 API Key
+XFYUN_API_SECRET = ""  # 讯飞 API Secret
+XFYUN_VOICEPRINT_URL = "https://api.xf-yun.com/v1/private/s1aa729d0"
+XFYUN_VOICEPRINT_GROUP_ID = "default_group"  # 声纹组 ID
+XFYUN_VOICEPRINT_THRESHOLD = 0.8  # 声纹匹配阈值

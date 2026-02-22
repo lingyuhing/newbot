@@ -121,8 +121,7 @@ class VolcanoASR:
                 "format": "wav",
                 "sample_rate": 16000,
                 "bits": 16,
-                "channel": 1,
-                "language": "zh-CN",
+                "channel": 1
             },
             "request": {
                 "model_name": "bigmodel",
