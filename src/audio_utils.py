@@ -1,6 +1,7 @@
 """音频处理工具"""
 import base64
 import io
+import wave
 import tempfile
 import os
 from datetime import datetime
@@ -44,10 +45,22 @@ def save_audio_to_disk(audio_base64: str, channel_id: str = None) -> Optional[st
         
         filepath = os.path.join(AUDIO_SAVE_DIR, filename)
         
-        # 解码并保存
+        # 解码音频数据
         audio_data = base64.b64decode(audio_base64)
-        with open(filepath, "wb") as f:
-            f.write(audio_data)
+        
+        # 检查是否已经是 WAV 格式（有 RIFF 头）
+        if audio_data[:4] == b'RIFF':
+            # 已经是 WAV 格式，直接写入
+            with open(filepath, "wb") as f:
+                f.write(audio_data)
+        else:
+            # 原始 PCM 数据，需要添加 WAV 头
+            # 假设格式：16kHz, 16bit, mono（与客户端配置一致）
+            with wave.open(filepath, "wb") as wav_file:
+                wav_file.setnchannels(1)      # 单声道
+                wav_file.setsampwidth(2)       # 16bit = 2 bytes
+                wav_file.setframerate(16000)   # 16kHz
+                wav_file.writeframes(audio_data)
         
         logger.info(f"音频已保存: {filepath}")
         return filepath

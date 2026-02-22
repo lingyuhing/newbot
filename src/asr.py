@@ -2,8 +2,10 @@
 import base64
 import hashlib
 import hmac
+import io
 import time
 import uuid
+import wave
 import requests
 from typing import Optional
 from dataclasses import dataclass
@@ -77,6 +79,32 @@ class VolcanoASR:
             "Content-Type": "application/json",
         }
     
+    def _ensure_wav_format(self, audio_base64: str) -> str:
+        """
+        确保音频是 WAV 格式
+        
+        Args:
+            audio_base64: base64 编码的音频数据
+            
+        Returns:
+            WAV 格式的 base64 编码音频
+        """
+        audio_data = base64.b64decode(audio_base64)
+        
+        # 已经是 WAV 格式
+        if audio_data[:4] == b'RIFF':
+            return audio_base64
+        
+        # 原始 PCM 数据，添加 WAV 头（16kHz, 16bit, mono）
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(16000)
+            wav_file.writeframes(audio_data)
+        
+        return base64.b64encode(buffer.getvalue()).decode("utf-8")
+    
     def submit(self, audio_base64: str, enable_speaker_info: bool = True) -> Optional[str]:
         """
         提交 ASR 任务
@@ -90,8 +118,13 @@ class VolcanoASR:
         """
         headers = self._get_headers(sequence=1)
         
+        # 确保音频是 WAV 格式
+        audio_base64 = self._ensure_wav_format(audio_base64)
+        
         payload = {
-            "audio": audio_base64,
+            "audio": {
+                "data": audio_base64,
+            },
             "enable_speaker_info": enable_speaker_info,
         }
         

@@ -50,7 +50,7 @@ def send_token(websocket,data,client_id):
                                               audio=data.get("audio"))):
         token_count += 1
         asyncio.run(websocket.send_text(token))
-        if messages_list[-1] != data:
+        if messages_list and messages_list[-1] != data:
             break
     log_response(logger, client_id, token_count)
     messages_list.clear()
@@ -97,9 +97,8 @@ async def send_message(message: Message):
     logger.info(f"消息已发送: channel_id={message.channel_id}")
     return "成功"
 
-"""
+
 if __name__ == "__main__":
     import uvicorn
     logger.info(f"服务器监听 {HOST}:{PORT}")
     uvicorn.run("main:app", host=HOST, port=PORT, reload=True)
-"""
