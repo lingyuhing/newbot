@@ -6,6 +6,8 @@ from src.config import HOST,PORT,LOG_LEVEL,LOG_FILE,LOG_DIR,LOG_JSON_FORMAT
 from src.logger import setup_logger, log_websocket, log_error, log_request, log_response
 import asyncio
 
+messages_list = []
+
 class Message(BaseModel):
     context: str
     channel_id: str
@@ -41,6 +43,18 @@ class ConnectionManager:
         if client_id in self.active_connections:
             await self.active_connections[client_id].send_text(message)
 
+def send_token(websocket,data,client_id):
+    token_count = 0
+    for token in stream(MessageChannelMessage(message_channel_id=client_id,
+                                              multimodal=data.get("multimodal"),
+                                              audio=data.get("audio"))):
+        token_count += 1
+        asyncio.run(websocket.send_text(token))
+        if messages_list[-1] != data:
+            break
+    log_response(logger, client_id, token_count)
+    messages_list.clear()
+
 manager = ConnectionManager()
 @app.websocket("/ws/{client_id}")
 async def chat(websocket: WebSocket, client_id: str):
@@ -49,17 +63,10 @@ async def chat(websocket: WebSocket, client_id: str):
         log_websocket(logger, "CONNECT", client_id, "新连接已建立")
         try:
             while True:
-                data = await websocket.receive_text()
-                log_request(logger, client_id, data)
-
-                token_count = 0
-                def send_token():
-                    nonlocal token_count
-                    for token in stream(MessageChannelMessage(message_channel_id=client_id, context=data)):
-                        token_count += 1
-                        asyncio.run(websocket.send_text(token))
-                await asyncio.to_thread(send_token)
-                log_response(logger, client_id, token_count)
+                data: dict= await websocket.receive_json()
+                log_request(logger, client_id, str(data))
+                messages_list.append(data)
+                asyncio.create_task(asyncio.to_thread(send_token,websocket,data,client_id))
         except WebSocketDisconnect:
             log_websocket(logger, "DISCONNECT", client_id, "客户端主动断开")
             manager.disconnect(client_id)

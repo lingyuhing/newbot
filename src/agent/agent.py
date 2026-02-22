@@ -11,8 +11,8 @@ from src.logger import setup_logger, get_logger
 
 class MessageChannelMessage(BaseModel):
     message_channel_id: str
-    context: str
-    image:list[dict] = []
+    multimodal:list[dict] = []
+    audio:str | None = None
 
 # 初始化日志
 logger = setup_logger(
@@ -63,15 +63,9 @@ def stream(messages: MessageChannelMessage):
         }
     }
     
-    messages_dict = {
-        "消息渠道ID": messages.message_channel_id,
-        "发送内容": messages.context
-    }
-    messages_json = json.dumps(messages_dict, ensure_ascii=False)
-    
     try:
         result = agent.stream(
-            {"messages": [{"role": "user", "content": [{"type":"text","text":messages_json}]+messages.image}]},
+            {"messages": [{"role": "user", "content": [{"type":"text","text":f"消息渠道ID: {messages.message_channel_id}"}]+messages.multimodal}]},
             config=config,
             stream_mode="messages"
         )
