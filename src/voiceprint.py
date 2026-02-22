@@ -1,33 +1,19 @@
-"""
-讯飞声纹识别模块
-
-支持功能：
-- 创建声纹组 (createGroup)
-- 创建声纹特征 (createFeature)
-- 1:N 声纹检索 (searchFea)
-- 1:1 声纹比对 (searchScoreFea)
-"""
-
+"""讯飞声纹识别服务"""
 import base64
 import hashlib
 import hmac
-import time
 import json
-import requests
+import time
 from datetime import datetime
 from typing import Optional
+import requests
 from dataclasses import dataclass
-from src.config import (
-    XFYUN_API_KEY,
-    XFYUN_API_SECRET,
-    XFYUN_VOICEPRINT_URL,
-    XFYUN_VOICEPRINT_GROUP_ID,
-    XFYUN_VOICEPRINT_THRESHOLD,
-    LOG_LEVEL,
-    LOG_DIR,
-    LOG_JSON_FORMAT,
-)
 from src.logger import setup_logger
+from src.config import (
+    XFYUN_API_KEY, XFYUN_API_SECRET, XFYUN_VOICEPRINT_URL,
+    XFYUN_VOICEPRINT_GROUP_ID, XFYUN_VOICEPRINT_THRESHOLD,
+    LOG_LEVEL, LOG_DIR, LOG_JSON_FORMAT
+)
 
 logger = setup_logger(
     name="newbot.voiceprint",
@@ -41,259 +27,232 @@ logger = setup_logger(
 @dataclass
 class VoiceprintResult:
     """声纹识别结果"""
-
     feature_id: str  # 声纹特征 ID
-    score: float  # 匹配分数
-    is_new: bool  # 是否为新声纹
-    speaker_name: Optional[str] = None  # 说话人名称（如有）
+    is_new: bool  # 是否为新创建的声纹
+    score: float  # 匹配分数 (如果是匹配到的)
 
 
 class XunfeiVoiceprint:
     """讯飞声纹识别客户端"""
-
+    
     def __init__(
         self,
         api_key: str = XFYUN_API_KEY,
         api_secret: str = XFYUN_API_SECRET,
         base_url: str = XFYUN_VOICEPRINT_URL,
         group_id: str = XFYUN_VOICEPRINT_GROUP_ID,
-        threshold: float = XFYUN_VOICEPRINT_THRESHOLD,
+        threshold: int = XFYUN_VOICEPRINT_THRESHOLD,
     ):
         self.api_key = api_key
         self.api_secret = api_secret
         self.base_url = base_url
         self.group_id = group_id
         self.threshold = threshold
-
-    def _get_auth_headers(self) -> dict:
-        """生成鉴权请求头"""
+        
+    def _get_auth_url(self) -> str:
+        """生成鉴权 URL"""
         # RFC1123 格式时间
-        date_str = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT")
-
-        # 签名原串
-        signature_origin = f"host: api.xf-yun.com\ndate: {date_str}\nGET /v1/private/s1aa729d0 HTTP/1.1"
-        signature = base64.b64encode(
-            hmac.new(
-                self.api_secret.encode("utf-8"),
-                signature_origin.encode("utf-8"),
-                hashlib.sha256,
-            ).digest()
-        ).decode("utf-8")
-
-        authorization_origin = (
-            f'api_key="{self.api_key}", '
-            f'algorithm="hmac-sha256", '
-            f'headers="host date request-line", '
-            f'signature="{signature}"'
-        )
+        now = datetime.utcnow()
+        date = now.strftime("%a, %d %b %Y %H:%M:%S GMT")
+        
+        # 签名原文: host + date + request-line
+        signature_origin = f"host: api.xf-yun.com\ndate: {date}\nGET /v1/private/s1aa729d0 HTTP/1.1"
+        
+        # HMAC-SHA256 签名
+        signature_sha = hmac.new(
+            self.api_secret.encode("utf-8"),
+            signature_origin.encode("utf-8"),
+            hashlib.sha256
+        ).digest()
+        
+        signature = base64.b64encode(signature_sha).decode("utf-8")
+        
+        # authorization
+        authorization_origin = f'api_key="{self.api_key}", algorithm="hmac-sha256", headers="host date request-line", signature="{signature}"'
         authorization = base64.b64encode(authorization_origin.encode("utf-8")).decode("utf-8")
-
+        
+        # 最终 URL
+        url = f"{self.base_url}?authorization={authorization}&date={date}&host=api.xf-yun.com"
+        return url
+    
+    def _get_headers(self) -> dict:
+        """获取请求头"""
         return {
-            "Authorization": authorization,
-            "Date": date_str,
-            "Host": "api.xf-yun.com",
             "Content-Type": "application/json",
         }
-
-    def _build_url(self, params: dict) -> str:
-        """构建带签名的 URL"""
-        # 时间戳
-        ts = str(int(time.time()))
-        # 签名
-        base_string = "&".join([f"{k}={v}" for k, v in sorted(params.items())])
-        sign = base64.b64encode(
-            hmac.new(
-                self.api_secret.encode("utf-8"),
-                base_string.encode("utf-8"),
-                hashlib.sha256,
-            ).digest()
-        ).decode("utf-8")
-
-        query = f"?{base_string}&signature={sign}"
-        return f"{self.base_url}{query}"
-
-    def create_group(self, group_name: str) -> str:
+    
+    def create_group(self, group_name: str = None) -> Optional[str]:
         """
-        创建声纹组
-
+        创建声纹库
+        
         Args:
-            group_name: 声纹组名称
-
+            group_name: 声纹库名称
+            
         Returns:
-            声纹组 ID
+            声纹库 ID 或 None
         """
-        headers = self._get_auth_headers()
+        if group_name is None:
+            group_name = self.group_id
+            
+        url = self._get_auth_url()
         payload = {
-            "header": {"app_id": self.api_key, "status": 3},
-            "parameter": {"s1aa729d0": {"groupId": self.group_id, "groupName": group_name}},
+            "header": {
+                "app_id": self.api_key,
+                "status": 3,  # 一次性传输完成
+            },
+            "parameter": {
+                "s1aa729d0": {
+                    "groupId": group_name,
+                }
+            },
+            "payload": {}
         }
-
-        response = requests.post(
-            f"{self.base_url}?action=createGroup",
-            headers=headers,
-            json=payload,
-        )
-
-        if response.status_code != 200:
-            logger.error(f"创建声纹组失败: {response.status_code} - {response.text}")
-            raise Exception(f"创建声纹组失败: {response.text}")
-
-        result = response.json()
-        if result.get("header", {}).get("code") != 0:
-            logger.error(f"创建声纹组错误: {result}")
-            raise Exception(f"创建声纹组错误: {result}")
-
-        logger.info(f"声纹组已创建: group_id={self.group_id}")
-        return self.group_id
-
-    def create_feature(self, audio_base64: str, feature_id: Optional[str] = None) -> str:
+        
+        try:
+            response = requests.post(url, headers=self._get_headers(), json=payload)
+            result = response.json()
+            
+            if result.get("header", {}).get("code") == 0:
+                logger.info(f"声纹库创建成功: group_id={group_name}")
+                return group_name
+            else:
+                logger.error(f"声纹库创建失败: {result}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"声纹库创建异常: {e}", exc_info=True)
+            return None
+    
+    def create_feature(self, audio_base64: str, feature_id: str = None) -> Optional[str]:
         """
         创建声纹特征
-
+        
         Args:
-            audio_base64: Base64 编码的音频数据（16k, 16bit, mono wav）
-            feature_id: 指定特征 ID，不指定则自动生成
-
+            audio_base64: base64 编码的音频数据 (16k, 16bit, mono wav)
+            feature_id: 自定义特征 ID，不指定则自动生成
+            
         Returns:
-            特征 ID
+            特征 ID 或 None
         """
+        import uuid
         if feature_id is None:
-            import uuid
-
-            feature_id = str(uuid.uuid4())
-
-        headers = self._get_auth_headers()
+            feature_id = f"spk_{uuid.uuid4().hex[:12]}"
+            
+        url = self._get_auth_url()
         payload = {
-            "header": {"app_id": self.api_key, "status": 3},
+            "header": {
+                "app_id": self.api_key,
+                "status": 3,
+            },
             "parameter": {
                 "s1aa729d0": {
                     "groupId": self.group_id,
                     "featureId": feature_id,
-                    "audioType": "wav",
                 }
             },
-            "payload": {"audio": audio_base64},
+            "payload": {
+                "audio": audio_base64
+            }
         }
-
-        response = requests.post(
-            f"{self.base_url}?action=createFeature",
-            headers=headers,
-            json=payload,
-        )
-
-        if response.status_code != 200:
-            logger.error(f"创建声纹特征失败: {response.status_code} - {response.text}")
-            raise Exception(f"创建声纹特征失败: {response.text}")
-
-        result = response.json()
-        if result.get("header", {}).get("code") != 0:
-            logger.error(f"创建声纹特征错误: {result}")
-            raise Exception(f"创建声纹特征错误: {result}")
-
-        logger.info(f"声纹特征已创建: feature_id={feature_id}")
-        return feature_id
-
-    def search_feature(self, audio_base64: str, top_k: int = 1) -> Optional[VoiceprintResult]:
+        
+        try:
+            response = requests.post(url, headers=self._get_headers(), json=payload)
+            result = response.json()
+            
+            if result.get("header", {}).get("code") == 0:
+                logger.info(f"声纹特征创建成功: feature_id={feature_id}")
+                return feature_id
+            else:
+                logger.error(f"声纹特征创建失败: {result}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"声纹特征创建异常: {e}", exc_info=True)
+            return None
+    
+    def search(self, audio_base64: str, top_k: int = 1) -> Optional[list]:
         """
-        1:N 声纹检索
-
+        声纹 1:N 检索
+        
         Args:
-            audio_base64: Base64 编码的音频数据
+            audio_base64: base64 编码的音频数据
             top_k: 返回前 K 个匹配结果
-
+            
         Returns:
-            最佳匹配结果，无匹配则返回 None
+            匹配结果列表 [{"featureId": str, "score": float}, ...]
         """
-        headers = self._get_auth_headers()
+        url = self._get_auth_url()
         payload = {
-            "header": {"app_id": self.api_key, "status": 3},
+            "header": {
+                "app_id": self.api_key,
+                "status": 3,
+            },
             "parameter": {
                 "s1aa729d0": {
                     "groupId": self.group_id,
-                    "audioType": "wav",
                     "topK": top_k,
                 }
             },
-            "payload": {"audio": audio_base64},
+            "payload": {
+                "audio": audio_base64
+            }
         }
-
-        response = requests.post(
-            f"{self.base_url}?action=searchFea",
-            headers=headers,
-            json=payload,
-        )
-
-        if response.status_code != 200:
-            logger.error(f"声纹检索失败: {response.status_code} - {response.text}")
-            raise Exception(f"声纹检索失败: {response.text}")
-
-        result = response.json()
-        if result.get("header", {}).get("code") != 0:
-            logger.error(f"声纹检索错误: {result}")
-            raise Exception(f"声纹检索错误: {result}")
-
-        # 解析结果
-        payload = result.get("payload", {})
-        if "features" not in payload or not payload["features"]:
+        
+        try:
+            response = requests.post(url, headers=self._get_headers(), json=payload)
+            result = response.json()
+            
+            if result.get("header", {}).get("code") == 0:
+                candidates = result.get("payload", {}).get("candidates", [])
+                logger.info(f"声纹检索完成: 找到 {len(candidates)} 个候选")
+                return candidates
+            else:
+                logger.error(f"声纹检索失败: {result}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"声纹检索异常: {e}", exc_info=True)
             return None
-
-        # 解码 features
-        features_json = base64.b64decode(payload["features"]).decode("utf-8")
-        features = json.loads(features_json)
-
-        if not features:
-            return None
-
-        # 取最佳匹配
-        best_match = features[0]
-        feature_id = best_match.get("featureId", "")
-        score = best_match.get("score", 0.0)
-
-        logger.info(f"声纹检索结果: feature_id={feature_id}, score={score}")
-        return VoiceprintResult(
-            feature_id=feature_id,
-            score=score,
-            is_new=False,
-        )
-
-    def identify_or_create(self, audio_base64: str) -> VoiceprintResult:
+    
+    def identify_speaker(self, audio_base64: str) -> Optional[VoiceprintResult]:
         """
-        识别声纹，如无匹配则创建新声纹
-
+        识别说话人：先检索，若匹配则返回，否则创建新声纹
+        
         Args:
-            audio_base64: Base64 编码的音频数据
-
+            audio_base64: base64 编码的音频数据
+            
         Returns:
-            声纹识别结果
+            VoiceprintResult 或 None
         """
-        # 先检索
-        result = self.search_feature(audio_base64)
-
-        if result is not None and result.score >= self.threshold:
-            logger.info(f"声纹匹配成功: feature_id={result.feature_id}, score={result.score}")
-            return result
-
-        # 无匹配或分数低于阈值，创建新声纹
-        logger.info(f"声纹无匹配，创建新声纹: score={result.score if result else 'N/A'}")
+        # 1:N 检索
+        candidates = self.search(audio_base64)
+        
+        if candidates and len(candidates) > 0:
+            best_match = candidates[0]
+            score = best_match.get("score", 0)
+            feature_id = best_match.get("featureId", "")
+            
+            # 检查是否超过阈值
+            if score >= self.threshold and feature_id:
+                logger.info(f"声纹匹配成功: feature_id={feature_id}, score={score}")
+                return VoiceprintResult(
+                    feature_id=feature_id,
+                    is_new=False,
+                    score=score
+                )
+        
+        # 未匹配，创建新声纹
         new_feature_id = self.create_feature(audio_base64)
+        if new_feature_id:
+            logger.info(f"创建新声纹: feature_id={new_feature_id}")
+            return VoiceprintResult(
+                feature_id=new_feature_id,
+                is_new=True,
+                score=0.0
+            )
+        
+        return None
 
-        return VoiceprintResult(
-            feature_id=new_feature_id,
-            score=0.0,
-            is_new=True,
-        )
 
-
-def identify_speaker(audio_base64: str, threshold: float = XFYUN_VOICEPRINT_THRESHOLD) -> VoiceprintResult:
-    """
-    便捷函数：识别说话人
-
-    Args:
-        audio_base64: Base64 编码的音频数据
-        threshold: 匹配阈值
-
-    Returns:
-        声纹识别结果
-    """
-    client = XunfeiVoiceprint(threshold=threshold)
-    return client.identify_or_create(audio_base64)
+# 单例
+voiceprint_client = XunfeiVoiceprint()

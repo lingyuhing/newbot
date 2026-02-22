@@ -1,17 +1,12 @@
-"""
-音频处理工具模块
-
-提供音频分段提取、格式转换等功能
-"""
-
+"""音频处理工具"""
 import base64
-import subprocess
+import io
 import tempfile
 import os
-import requests
+from datetime import datetime
 from typing import Optional
-from src.config import LOG_LEVEL, LOG_DIR, LOG_JSON_FORMAT
 from src.logger import setup_logger
+from src.config import LOG_LEVEL, LOG_DIR, LOG_JSON_FORMAT
 
 logger = setup_logger(
     name="newbot.audio_utils",
@@ -21,184 +16,172 @@ logger = setup_logger(
     json_format=LOG_JSON_FORMAT,
 )
 
+# 音频保存目录
+AUDIO_SAVE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "audio")
 
-def download_audio(audio_url: str, output_path: Optional[str] = None) -> str:
+
+def save_audio_to_disk(audio_base64: str, channel_id: str = None) -> Optional[str]:
     """
-    下载音频文件
-
+    保存 base64 音频到磁盘
+    
     Args:
-        audio_url: 音频 URL
-        output_path: 输出路径，不指定则使用临时文件
-
+        audio_base64: base64 编码的音频数据
+        channel_id: 可选的频道ID，用于文件命名
+        
     Returns:
-        本地音频文件路径
+        保存的文件路径，失败返回 None
     """
-    if output_path is None:
-        # 创建临时文件
-        fd, output_path = tempfile.mkstemp(suffix=".wav")
-        os.close(fd)
-
-    logger.info(f"下载音频: {audio_url}")
-    response = requests.get(audio_url, stream=True)
-    response.raise_for_status()
-
-    with open(output_path, "wb") as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            f.write(chunk)
-
-    logger.info(f"音频已下载: {output_path}")
-    return output_path
-
-
-def extract_audio_segment_base64(
-    audio_path: str,
-    start_ms: int,
-    end_ms: int,
-    sample_rate: int = 16000,
-    channels: int = 1,
-) -> str:
-    """
-    提取音频片段并转换为 Base64
-
-    使用 ffmpeg 提取指定时间段的音频，转换为 16k 16bit mono wav 格式
-
-    Args:
-        audio_path: 音频文件路径或 URL
-        start_ms: 开始时间（毫秒）
-        end_ms: 结束时间（毫秒）
-        sample_rate: 采样率（默认 16000）
-        channels: 声道数（默认 1）
-
-    Returns:
-        Base64 编码的音频数据
-    """
-    start_sec = start_ms / 1000
-    duration = (end_ms - start_ms) / 1000
-
-    logger.debug(f"提取音频片段: start={start_sec}s, duration={duration}s")
-
-    # 使用 ffmpeg 提取片段并输出到 stdout
-    cmd = [
-        "ffmpeg",
-        "-y",  # 覆盖输出文件
-        "-ss",
-        str(start_sec),  # 开始时间
-        "-i",
-        audio_path,  # 输入文件
-        "-t",
-        str(duration),  # 持续时间
-        "-f",
-        "wav",  # 输出格式
-        "-acodec",
-        "pcm_s16le",  # 16bit PCM
-        "-ar",
-        str(sample_rate),  # 采样率
-        "-ac",
-        str(channels),  # 声道数
-        "-",  # 输出到 stdout
-    ]
-
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            check=True,
-        )
-        audio_data = result.stdout
-        logger.debug(f"音频片段提取成功: {len(audio_data)} bytes")
-        return base64.b64encode(audio_data).decode("utf-8")
-
-    except subprocess.CalledProcessError as e:
-        logger.error(f"ffmpeg 提取失败: {e.stderr.decode()}")
-        raise RuntimeError(f"音频提取失败: {e.stderr.decode()}")
-    except FileNotFoundError:
-        logger.error("ffmpeg 未安装")
-        raise RuntimeError("ffmpeg 未安装，请先安装 ffmpeg")
-
-
-def extract_audio_segment_from_url(
-    audio_url: str,
-    start_ms: int,
-    end_ms: int,
-    sample_rate: int = 16000,
-    channels: int = 1,
-    keep_local: bool = False,
-) -> tuple[str, Optional[str]]:
-    """
-    从 URL 提取音频片段
-
-    Args:
-        audio_url: 音频 URL
-        start_ms: 开始时间（毫秒）
-        end_ms: 结束时间（毫秒）
-        sample_rate: 采样率
-        channels: 声道数
-        keep_local: 是否保留本地下载的文件
-
-    Returns:
-        (Base64 音频数据, 本地文件路径或 None)
-    """
-    # 下载音频到本地
-    local_path = download_audio(audio_url)
-
-    try:
-        # 提取片段
-        audio_base64 = extract_audio_segment_base64(
-            local_path, start_ms, end_ms, sample_rate, channels
-        )
-
-        if keep_local:
-            return audio_base64, local_path
+        # 确保目录存在
+        os.makedirs(AUDIO_SAVE_DIR, exist_ok=True)
+        
+        # 生成文件名：时间戳 + 频道ID
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if channel_id:
+            filename = f"{timestamp}_{channel_id}.wav"
         else:
-            # 删除临时文件
-            os.remove(local_path)
-            return audio_base64, None
-
+            filename = f"{timestamp}.wav"
+        
+        filepath = os.path.join(AUDIO_SAVE_DIR, filename)
+        
+        # 解码并保存
+        audio_data = base64.b64decode(audio_base64)
+        with open(filepath, "wb") as f:
+            f.write(audio_data)
+        
+        logger.info(f"音频已保存: {filepath}")
+        return filepath
+        
     except Exception as e:
-        # 确保清理临时文件
-        if os.path.exists(local_path):
-            os.remove(local_path)
-        raise
+        logger.error(f"保存音频失败: {e}", exc_info=True)
+        return None
 
 
-def convert_to_wav16k(
-    audio_path: str,
-    output_path: Optional[str] = None,
-) -> str:
+def extract_audio_segment(
+    audio_base64: str,
+    start_ms: int,
+    end_ms: int
+) -> Optional[str]:
+    """
+    从 base64 音频中提取指定时间段的片段
+    
+    Args:
+        audio_base64: 原始音频的 base64 编码
+        start_ms: 起始时间（毫秒）
+        end_ms: 结束时间（毫秒）
+        
+    Returns:
+        提取片段的 base64 编码，失败返回 None
+    """
+    try:
+        # 解码 base64
+        audio_data = base64.b64decode(audio_base64)
+        
+        # 尝试使用 pydub 处理音频
+        try:
+            from pydub import AudioSegment
+        except ImportError:
+            logger.warning("pydub 未安装，使用简单字节截取方式")
+            return _extract_segment_simple(audio_data, start_ms, end_ms)
+        
+        # 使用 pydub 处理
+        audio = AudioSegment.from_file(io.BytesIO(audio_data))
+        
+        # 提取片段
+        segment = audio[start_ms:end_ms]
+        
+        # 转换为 16k, 16bit, mono wav
+        segment = segment.set_frame_rate(16000)
+        segment = segment.set_sample_width(2)  # 16bit = 2 bytes
+        segment = segment.set_channels(1)  # mono
+        
+        # 导出为 wav
+        buffer = io.BytesIO()
+        segment.export(buffer, format="wav")
+        segment_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        
+        logger.debug(f"提取音频片段: {start_ms}ms - {end_ms}ms")
+        return segment_base64
+        
+    except Exception as e:
+        logger.error(f"提取音频片段失败: {e}", exc_info=True)
+        return None
+
+
+def _extract_segment_simple(audio_data: bytes, start_ms: int, end_ms: int) -> Optional[str]:
+    """
+    简单的音频片段提取（假设是 16k 16bit mono wav）
+    
+    Args:
+        audio_data: 原始音频数据
+        start_ms: 起始时间（毫秒）
+        end_ms: 结束时间（毫秒）
+        
+    Returns:
+        提取片段的 base64 编码
+    """
+    try:
+        # 跳过 wav 头 (44 bytes)
+        if audio_data[:4] == b'RIFF':
+            audio_data = audio_data[44:]
+        
+        # 16k 16bit mono = 32000 bytes/s = 32 bytes/ms
+        bytes_per_ms = 32
+        
+        start_byte = start_ms * bytes_per_ms
+        end_byte = end_ms * bytes_per_ms
+        
+        segment_data = audio_data[start_byte:end_byte]
+        
+        # 生成新的 wav 头
+        import wave
+        buffer = io.BytesIO()
+        with wave.open(buffer, 'wb') as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(16000)
+            wav_file.writeframes(segment_data)
+        
+        segment_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        return segment_base64
+        
+    except Exception as e:
+        logger.error(f"简单提取失败: {e}", exc_info=True)
+        return None
+
+
+def convert_to_wav_16k(audio_base64: str) -> Optional[str]:
     """
     将音频转换为 16k 16bit mono wav 格式
-
+    
     Args:
-        audio_path: 输入音频路径
-        output_path: 输出路径，不指定则使用临时文件
-
+        audio_base64: 原始音频的 base64 编码
+        
     Returns:
-        转换后的文件路径
+        转换后音频的 base64 编码，失败返回 None
     """
-    if output_path is None:
-        fd, output_path = tempfile.mkstemp(suffix=".wav")
-        os.close(fd)
-
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        audio_path,
-        "-f",
-        "wav",
-        "-acodec",
-        "pcm_s16le",
-        "-ar",
-        "16000",
-        "-ac",
-        "1",
-        output_path,
-    ]
-
     try:
-        subprocess.run(cmd, capture_output=True, check=True)
-        logger.info(f"音频转换成功: {output_path}")
-        return output_path
-    except subprocess.CalledProcessError as e:
-        logger.error(f"音频转换失败: {e.stderr.decode()}")
-        raise RuntimeError(f"音频转换失败: {e.stderr.decode()}")
+        audio_data = base64.b64decode(audio_base64)
+        
+        try:
+            from pydub import AudioSegment
+        except ImportError:
+            logger.warning("pydub 未安装，假设音频已是正确格式")
+            return audio_base64
+        
+        audio = AudioSegment.from_file(io.BytesIO(audio_data))
+        
+        # 转换格式
+        audio = audio.set_frame_rate(16000)
+        audio = audio.set_sample_width(2)
+        audio = audio.set_channels(1)
+        
+        # 导出
+        buffer = io.BytesIO()
+        audio.export(buffer, format="wav")
+        
+        return base64.b64encode(buffer.getvalue()).decode("utf-8")
+        
+    except Exception as e:
+        logger.error(f"音频格式转换失败: {e}", exc_info=True)
+        return None

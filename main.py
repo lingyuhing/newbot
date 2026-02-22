@@ -58,6 +58,7 @@ def send_token(websocket,data,client_id):
 manager = ConnectionManager()
 @app.websocket("/ws/{client_id}")
 async def chat(websocket: WebSocket, client_id: str):
+    "供消息渠道连接"
     if client_id not in manager.active_connections.keys():
         await manager.connect(websocket,client_id)
         log_websocket(logger, "CONNECT", client_id, "新连接已建立")
@@ -81,12 +82,14 @@ async def chat(websocket: WebSocket, client_id: str):
 
 @app.get("/get_channel_id")
 def get_channel_id():
+    "供agent通过skill获取活跃连接的频道ID列表"
     clients = list(manager.active_connections.keys())
     logger.debug(f"查询活跃连接: {len(clients)} 个客户端")
     return clients
 
 @app.post("/send_message")
 async def send_message(message: Message):
+    "供agent通过skill发送消息给非当前使用的消息渠道"
     if message.channel_id not in manager.active_connections.keys():
         logger.warning(f"发送失败: 频道不存在 channel_id={message.channel_id}")
         return "频道不存在"
