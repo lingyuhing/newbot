@@ -42,7 +42,8 @@ agent = create_deep_agent(
     backend=LocalShellBackend(root_dir=ROOT_DIR, virtual_mode=VIRTUAL_MODE),
     skills=SKILL_DIR,
     tools=[search_memory_tool],
-    checkpointer=checkpointer
+    checkpointer=checkpointer,
+    memory=["/work/AGENTS.md"]
 )
 
 logger.info(f"Agent 初始化完成: model={LLM_MODEL}, root_dir={ROOT_DIR}")
