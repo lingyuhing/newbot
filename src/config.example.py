@@ -24,14 +24,19 @@ LOG_DIR = "logs"
 LOG_FILE = "server.log"
 LOG_JSON_FORMAT = False
 
-# 火山引擎 ASR 配置
-ASR_APP_KEY = ""  # 火山引擎 ASR App Key
-ASR_ACCESS_KEY = ""  # 火山引擎 Access Key
-ASR_RESOURCE_ID = "volc.seedasr.auc"  # Seed-ASR 模型 2.0
+# ==================== 讯飞实时语音转写大模型配置 ====================
+# 支持 ASR + 声纹分离一体化
+XFYUN_ASR_APP_ID = "your-xfyun-app-id"  # 讯飞应用ID
+XFYUN_ASR_ACCESS_KEY_ID = "your-access-key-id"  # 讯飞访问密钥ID
+XFYUN_ASR_ACCESS_KEY_SECRET = "your-access-key-secret"  # 讯飞访问密钥Secret
 
-# 讯飞声纹识别配置
-XFYUN_API_KEY = ""  # 讯飞 API Key
-XFYUN_API_SECRET = ""  # 讯飞 API Secret
-XFYUN_VOICEPRINT_URL = "https://api.xf-yun.com/v1/private/s1aa729d0"
-XFYUN_VOICEPRINT_GROUP_ID = "default_group"  # 声纹组 ID
-XFYUN_VOICEPRINT_THRESHOLD = 0.8  # 声纹匹配阈值
+# ASR 转写参数配置
+ASR_LANGUAGE = "autodialect"  # 语种: autodialect(中英+方言)/autominor(多语种)
+ASR_ROLE_TYPE = 2  # 角色分离: 0(关闭)/2(声纹分离模式)
+ASR_ENG_SPK_MATCH = 0  # 声纹匹配模式: 0(允许未知说话人)/1(严格匹配)
+
+# 声纹库存储配置
+import os
+VOICEPRINT_STORE_PATH = os.path.join(os.path.dirname(__file__), "..", "voiceprint_store.json")
+VOICEPRINT_PENDING_DIR = os.path.join(os.path.dirname(__file__), "..", "voiceprint_pending")
+VOICEPRINT_MIN_DURATION_MS = 10000  # 声纹注册最小音频时长（毫秒）

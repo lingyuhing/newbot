@@ -1,0 +1,15 @@
+{
+  "registered": {},
+  "pending": {
+    "pending_20260224_201815_322218": {
+      "audio_segments": [
+        {
+          "file": "/home/linyuxin/Desktop/newbot/voiceprint_pending/pending_20260224_201815_322218_seg_0.wav",
+          "duration_ms": 970
+        }
+      ],
+      "total_duration_ms": 970,
+      "created_at": "2026-02-24T20:18:15.322255"
+    }
+  }
+}

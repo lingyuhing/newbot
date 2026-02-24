@@ -59,23 +59,27 @@ pip install fastapi uvicorn langchain langgraph pydantic
   - Checkpointer：SQLite (`checkpoints.db`) 持久化会话状态
 - 会话管理：使用 `thread_id` (配置为 `USER_ID`) 保持会话上下文
 - `MessageChannelMessage` 封装消息渠道 ID、多模态内容和可选音频
-- `_process_audio()` 函数处理音频输入：ASR 识别 + 声纹识别
+- `_process_audio()` 函数处理音频输入：讯飞实时语音转写 + 声纹分离 + 自动注册
 
 **音频处理系统**
-- `src/asr.py`：火山引擎 ASR 语音识别（支持说话人分离）
-  - `ASRResult` 包含识别文本和 `utterances` 列表（每个片段含 speaker_id、start_time、end_time）
-  - 通过 `enable_speaker_info=True` 开启说话人分离
-- `src/voiceprint.py`：讯飞声纹识别（说话人身份识别）
-  - 维护声纹库，识别说话人身份（返回 feature_id）
-  - 支持新说话人自动注册
+- `src/xfyun_rtasr.py`：讯飞实时语音转写大模型客户端（支持 ASR + 声纹分离一体化）
+  - WebSocket 实时语音转写，音频格式要求：16kHz、16bit、单声道 PCM
+  - `RTASRResult` 包含识别文本、`utterances` 列表和 `unknown_speaker_ids` 集合
+  - 每个片段含 `speaker_id`、`feature_id`（匹配成功时）、`start_time`、`end_time`
+  - 通过 `role_type=2` 开启声纹分离模式，`eng_spk_match` 控制是否严格匹配声纹
+- `src/xfyun_voiceprint.py`：讯飞声纹管理模块
+  - HTTP API 调用：声纹注册/更新/删除
+  - JSON 存储：`voiceprint_store.json` 管理已注册声纹和待注册说话人
+  - 自动注册机制：累积未识别说话人的音频片段，达到阈值后自动注册
+  - 待注册片段存储：`voiceprint_pending/` 目录
 - `src/audio_utils.py`：音频工具集
-  - `extract_audio_segment()`：根据时间戳提取音频片段
   - `save_audio_to_disk()`：保存音频到 `audio/` 目录
+  - `extract_audio_segment()`：根据时间戳提取音频片段（支持 pydub 或简单字节截取）
 - 完整处理流程：
   1. 保存音频到磁盘
-  2. ASR 识别（获取文本 + 说话人分段）
-  3. 对每个说话人片段提取音频
-  4. 声纹识别匹配说话人身份
+  2. 调用讯飞实时语音转写（传入已注册声纹 ID 列表）
+  3. 对每个说话人片段检查是否匹配声纹
+  4. 处理未匹配说话人：累积音频片段 → 自动注册声纹
   5. 构建带说话人标识的格式化文本返回
 
 **记忆系统 (`src/agent/memory.py`)**
@@ -141,11 +145,15 @@ pip install fastapi uvicorn langchain langgraph pydantic
   - `MEM0_API_KEY`：Mem0 记忆服务密钥
   - `USER_ID`：用户标识（用于会话持久化和记忆检索）
 - **音频服务**：
-  - `ASR_APP_KEY`/`ASR_ACCESS_KEY`：火山引擎 ASR 配置
-  - `ASR_RESOURCE_ID`：ASR 资源 ID
-  - `XFYUN_API_KEY`/`XFYUN_API_SECRET`：讯飞声纹识别配置
-  - `XFYUN_VOICEPRINT_GROUP_ID`：声纹库组 ID
-  - `XFYUN_VOICEPRINT_THRESHOLD`：声纹匹配阈值
+  - `XFYUN_ASR_APP_ID`：讯飞应用 ID
+  - `XFYUN_ASR_ACCESS_KEY_ID`：讯飞访问密钥 ID
+  - `XFYUN_ASR_ACCESS_KEY_SECRET`：讯飞访问密钥 Secret
+  - `ASR_LANGUAGE`：语种配置（autodialect/autominor）
+  - `ASR_ROLE_TYPE`：角色分离模式（0=关闭，2=声纹分离）
+  - `ASR_ENG_SPK_MATCH`：声纹匹配模式（0=允许未知说话人，1=严格匹配）
+  - `VOICEPRINT_STORE_PATH`：声纹库 JSON 存储路径
+  - `VOICEPRINT_PENDING_DIR`：待注册音频片段目录
+  - `VOICEPRINT_MIN_DURATION_MS`：声纹注册最小音频时长（毫秒）
 - **服务器与日志**：
   - `HOST`/`PORT`：服务器监听地址
   - `LOG_LEVEL`/`LOG_DIR`/`LOG_FILE`：日志配置
@@ -163,11 +171,10 @@ pip install fastapi uvicorn langchain langgraph pydantic
 **音频处理流程：**
 1. 检测到 `audio` 字段时，调用 `_process_audio()`
 2. 保存音频到 `audio/` 目录（以 channel_id 和时间戳命名）
-3. 调用火山引擎 ASR 识别音频（开启说话人分离）
-4. 对每个说话人片段：
-   - 提取该时间段的音频片段
-   - 调用讯飞声纹识别确定说话人身份
-   - 缓存识别结果避免重复识别
+3. 获取已注册声纹 ID 列表，调用讯飞实时语音转写大模型（开启声纹分离）
+4. 处理转写结果：
+   - 已匹配声纹的片段：直接使用 feature_id 作为说话人标识
+   - 未匹配说话人：累积音频片段 → 达到阈值后自动注册声纹
 5. 构建格式化文本：`[音频内容：\n[说话人 ID]: 文本...]`
 6. 将音频上下文添加到消息内容中
 
